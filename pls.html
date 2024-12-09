@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced 3D Minecraft Simulator</title>
+  <style>
+    body { margin: 0; overflow: hidden; background-color: #000; }
+    canvas { display: block; }
+    #ui { position: fixed; top: 0; left: 0; width: 100%; color: white; font-family: Arial, sans-serif; padding: 10px; }
+    #inventory { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+    .slot { width: 50px; height: 50px; border: 2px solid #fff; background-color: #ccc; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; }
+    .active { border: 2px solid #FFD700; }
+    #minimap { position: fixed; top: 10px; right: 10px; width: 150px; height: 150px; border: 2px solid white; }
+  </style>
+</head>
+<body>
+<div id="ui">
+  <div id="info">FPS: <span id="fps">0</span> | Blocks Placed: <span id="blocks-placed">0</span></div>
+  <canvas id="minimap"></canvas>
+</div>
+<div id="inventory">
+  <div class="slot active" data-block="dirt">D</div>
+  <div class="slot" data-block="grass">G</div>
+  <div class="slot" data-block="stone">S</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+<script>
+// --- Setup ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 10, 20);
+
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// --- Lighting ---
+const sunlight = new THREE.DirectionalLight(0xffffff, 1);
+sunlight.position.set(50, 100, 50);
+sunlight.castShadow = true;
+scene.add(sunlight);
+
+const ambientLight = new THREE.AmbientLight(0xaaaaaa, 0.5);
+scene.add(ambientLight);
+
+// --- Block Textures ---
+const loader = new THREE.TextureLoader();
+const textures = {
+  dirt: loader.load("https://i.imgur.com/4Rnw7b1.jpg"),
+  grass: loader.load("https://i.imgur.com/xCkSUGD.jpg"),
+  stone: loader.load("https://i.imgur.com/Tmr5kWB.jpg"),
+};
+
+// --- World Generation ---
+const CHUNK_SIZE = 16;
+const world = new Map();
+
+function generateChunk(chunkX, chunkZ) {
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const chunkKey = `${chunkX},${chunkZ}`;
+  if (world.has(chunkKey)) return;
+
+  const chunk = [];
+  for (let x = 0; x < CHUNK_SIZE; x++) {
+    for (let z = 0; z < CHUNK_SIZE; z++) {
+      const worldX = chunkX * CHUNK_SIZE + x;
+      const worldZ = chunkZ * CHUNK_SIZE + z;
+      const height = Math.floor(Math.sin(worldX * 0.1) * 5 + Math.cos(worldZ * 0.1) * 5 + 10);
+
+      for (let y = 0; y <= height; y++) {
+        let material;
+        if (y === height) material = new THREE.MeshStandardMaterial({ map: textures.grass });
+        else if (y > height - 3) material = new THREE.MeshStandardMaterial({ map: textures.dirt });
+        else material = new THREE.MeshStandardMaterial({ map: textures.stone });
+
+        const block = new THREE.Mesh(geometry, material);
+        block.position.set(worldX, y, worldZ);
+        block.castShadow = true;
+        block.receiveShadow = true;
+        scene.add(block);
+        chunk.push(block);
+      }
+    }
+  }
+  world.set(chunkKey, chunk);
+}
+
+function unloadChunk(chunkKey) {
+  if (!world.has(chunkKey)) return;
+  world.get(chunkKey).forEach((block) => scene.remove(block));
+  world.delete(chunkKey);
+}
+
+function updateChunks() {
+  const playerChunkX = Math.floor(camera.position.x / CHUNK_SIZE);
+  const playerChunkZ = Math.floor(camera.position.z / CHUNK_SIZE);
+
+  const renderDistance = 3;
+  const loadedChunks = new Set(world.keys());
+
+  for (let x = -renderDistance; x <= renderDistance; x++) {
+    for (let z = -renderDistance; z <= renderDistance; z++) {
+      const chunkX = playerChunkX + x;
+      const chunkZ = playerChunkZ + z;
+      const chunkKey = `${chunkX},${chunkZ}`;
+      if (!world.has(chunkKey)) generateChunk(chunkX, chunkZ);
+      loadedChunks.delete(chunkKey);
+    }
+  }
+
+  loadedChunks.forEach(unloadChunk);
+}
+
+// --- Inventory & Block Placement ---
+let selectedBlock = "dirt";
+let blocksPlaced = 0;
+
+document.querySelectorAll(".slot").forEach((slot) => {
+  slot.addEventListener("click", () => {
+    document.querySelectorAll(".slot").forEach((s) => s.classList.remove("active"));
+    slot.classList.add("active");
+    selectedBlock = slot.getAttribute("data-block");
+  });
+});
+
+window.addEventListener("click", (e) => {
+  const mouse = new THREE.Vector2(
+    (e.clientX / window.innerWidth) * 2 - 1,
+    -(e.clientY / window.innerHeight) * 2 + 1
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(mouse, camera);
+
+  const intersects = raycaster.intersectObjects([...world.values()].flat());
+  if (intersects.length > 0) {
+    const position = intersects[0].point
+      .clone()
+      .add(intersects[0].face.normal)
+      .floor();
+
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshStandardMaterial({ map: textures[selectedBlock] });
+    const block = new THREE.Mesh(geometry, material);
+    block.position.copy(position);
+    block.castShadow = true;
+    block.receiveShadow = true;
+    scene.add(block);
+    blocksPlaced++;
+    document.getElementById("blocks-placed").textContent = blocksPlaced;
+  }
+});
+
+// --- Player Movement ---
+const controls = { forward: false, backward: false, left: false, right: false };
+window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyW") controls.forward = true;
+  if (e.code === "KeyS") controls.backward = true;
+  if (e.code === "KeyA") controls.left = true;
+  if (e.code === "KeyD") controls.right = true;
+});
+window.addEventListener("keyup", (e) => {
+  if (e.code === "KeyW") controls.forward = false;
+  if (e.code === "KeyS") controls.backward = false;
+  if (e.code === "KeyA") controls.left = false;
+  if (e.code === "KeyD") controls.right = false;
+});
+
+// --- Animation Loop ---
+let lastFrameTime = 0;
+function animate(time) {
+  const delta = (time - lastFrameTime) / 1000;
+  lastFrameTime = time;
+
+  if (controls.forward) camera.position.z -= 5 * delta;
+  if (controls.backward) camera.position.z += 5 * delta;
+  if (controls.left) camera.position.x -= 5 * delta;
+  if (controls.right) camera.position.x += 5 * delta;
+
+  updateChunks();
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>
