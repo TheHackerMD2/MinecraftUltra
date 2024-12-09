@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced Minecraft Simulator</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #87CEEB; /* Sky blue */
+    }
+    canvas {
+      display: block;
+    }
+    #inventory {
+      position: fixed;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+    }
+    .slot {
+      width: 50px;
+      height: 50px;
+      border: 2px solid #fff;
+      background-color: #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      cursor: pointer;
+    }
+    .active {
+      border: 2px solid #FFD700; /* Highlight selected block */
+    }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="inventory">
+  <div class="slot active" data-block="1">D</div>
+  <div class="slot" data-block="2">G</div>
+  <div class="slot" data-block="3">W</div>
+</div>
+
+<script>
+// --- Setup ---
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const TILE_SIZE = 40;
+const GRAVITY = 0.5;
+
+// --- World Generation ---
+const world = [];
+const worldWidth = 100;
+const worldHeight = 20;
+
+// Generate terrain with hills and trees
+function generateWorld() {
+  const baseHeight = 10;
+  for (let x = 0; x < worldWidth; x++) {
+    const column = [];
+    const height = baseHeight + Math.sin(x * 0.3) * 5;
+    for (let y = 0; y < worldHeight; y++) {
+      if (y > height) {
+        column.push(1); // Dirt
+      } else if (y === Math.floor(height)) {
+        column.push(2); // Grass
+      } else {
+        column.push(0); // Air
+      }
+    }
+    // Randomly add trees
+    if (Math.random() < 0.1) {
+      const treeHeight = 3;
+      for (let h = 1; h <= treeHeight; h++) {
+        column[Math.floor(height) - h] = 3; // Wood
+      }
+    }
+    world.push(column);
+  }
+}
+
+generateWorld();
+
+// --- Player ---
+const player = {
+  x: canvas.width / 2,
+  y: 100,
+  width: TILE_SIZE * 0.8,
+  height: TILE_SIZE * 1.5,
+  xVel: 0,
+  yVel: 0,
+  speed: 4,
+  jumpPower: 10,
+  grounded: false,
+};
+
+// --- Controls ---
+const keys = {};
+let selectedBlock = 1; // Default selected block
+window.addEventListener("keydown", (e) => (keys[e.code] = true));
+window.addEventListener("keyup", (e) => (keys[e.code] = false));
+
+// Inventory selection
+document.querySelectorAll(".slot").forEach((slot) => {
+  slot.addEventListener("click", () => {
+    document.querySelectorAll(".slot").forEach((s) => s.classList.remove("active"));
+    slot.classList.add("active");
+    selectedBlock = parseInt(slot.getAttribute("data-block"));
+  });
+});
+
+// --- Rendering ---
+function drawWorld() {
+  for (let x = 0; x < worldWidth; x++) {
+    for (let y = 0; y < worldHeight; y++) {
+      if (world[x][y] === 1) ctx.fillStyle = "#8B4513"; // Dirt
+      else if (world[x][y] === 2) ctx.fillStyle = "#228B22"; // Grass
+      else if (world[x][y] === 3) ctx.fillStyle = "#A0522D"; // Wood
+      else continue;
+
+      ctx.fillRect(
+        x * TILE_SIZE - camera.x,
+        y * TILE_SIZE - camera.y,
+        TILE_SIZE,
+        TILE_SIZE
+      );
+    }
+  }
+}
+
+function drawPlayer() {
+  ctx.fillStyle = "#FFD700"; // Gold color
+  ctx.fillRect(player.x - camera.x, player.y - camera.y, player.width, player.height);
+}
+
+// --- Camera ---
+const camera = {
+  x: 0,
+  y: 0,
+  update() {
+    camera.x = player.x - canvas.width / 2 + player.width / 2;
+    camera.y = player.y - canvas.height / 2 + player.height / 2;
+  },
+};
+
+// --- Physics ---
+function applyPhysics() {
+  player.yVel += GRAVITY;
+  player.grounded = false;
+
+  // Horizontal movement
+  if (keys["KeyA"]) player.xVel = -player.speed;
+  else if (keys["KeyD"]) player.xVel = player.speed;
+  else player.xVel *= 0.9; // Friction
+
+  // Jump
+  if (keys["Space"] && player.grounded) {
+    player.yVel = -player.jumpPower;
+    player.grounded = false;
+  }
+
+  // Apply velocities
+  player.x += player.xVel;
+  player.y += player.yVel;
+
+  // Collision detection
+  const tileX = Math.floor(player.x / TILE_SIZE);
+  const tileY = Math.floor(player.y / TILE_SIZE);
+
+  if (world[tileX] && world[tileX][tileY]) {
+    player.yVel = 0;
+    player.grounded = true;
+    player.y = tileY * TILE_SIZE;
+  }
+}
+
+// --- Block Placement and Destruction ---
+canvas.addEventListener("click", (e) => {
+  const mouseX = Math.floor((e.clientX + camera.x) / TILE_SIZE);
+  const mouseY = Math.floor((e.clientY + camera.y) / TILE_SIZE);
+
+  if (keys["ShiftLeft"]) {
+    // Remove block
+    if (world[mouseX] && world[mouseX][mouseY]) world[mouseX][mouseY] = 0;
+  } else {
+    // Place block
+    if (world[mouseX] && world[mouseX][mouseY] === 0) world[mouseX][mouseY] = selectedBlock;
+  }
+});
+
+// --- Main Loop ---
+function gameLoop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  camera.update();
+  applyPhysics();
+  drawWorld();
+  drawPlayer();
+
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
