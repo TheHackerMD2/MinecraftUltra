@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Minecraft Simulator</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #87ceeb; /* Sky blue */
+    }
+    #ui {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      color: white;
+      font-family: Arial, sans-serif;
+      padding: 10px;
+      display: flex;
+      justify-content: space-between;
+    }
+    #inventory {
+      position: fixed;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+    }
+    .slot {
+      width: 50px;
+      height: 50px;
+      border: 2px solid white;
+      background-color: gray;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      cursor: pointer;
+    }
+    .active {
+      border: 2px solid gold;
+    }
+  </style>
+</head>
+<body>
+<div id="ui">
+  <div id="stats">
+    <div>Health: <span id="health">100</span></div>
+    <div>Hunger: <span id="hunger">100</span></div>
+  </div>
+  <div id="crafting">
+    <button id="craft-wooden-pickaxe">Craft Pickaxe</button>
+  </div>
+</div>
+<div id="inventory">
+  <div class="slot active" data-block="wood">Wood</div>
+  <div class="slot" data-block="stone">Stone</div>
+  <div class="slot" data-block="dirt">Dirt</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
+<script>
+/** Game Settings **/
+const WORLD_SIZE = 500; // 500x500 world
+const CHUNK_SIZE = 16; // Chunk size for dynamic loading
+const PLAYER_SPEED = 5;
+const BIOME_THRESHOLD = { forest: 0.3, desert: 0.6, mountain: 0.8 };
+
+/** Game Variables **/
+let hunger = 100;
+let health = 100;
+let selectedBlock = "wood";
+let inventory = { wood: 0, stone: 0, dirt: 0 };
+const world = new Map();
+
+/** Setup Scene, Camera, and Renderer **/
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 10, 30);
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+/** Lighting **/
+const sunlight = new THREE.DirectionalLight(0xffffff, 1);
+sunlight.position.set(50, 100, 50);
+sunlight.castShadow = true;
+scene.add(sunlight);
+
+const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+scene.add(ambientLight);
+
+/** Textures **/
+const loader = new THREE.TextureLoader();
+const textures = {
+  wood: loader.load("https://i.imgur.com/eMeLy0s.jpg"),
+  dirt: loader.load("https://i.imgur.com/M4ZaMti.jpg"),
+  stone: loader.load("https://i.imgur.com/qbKNel3.jpg"),
+};
+
+/** Biome-Based Terrain Generation **/
+const simplex = new SimplexNoise();
+
+function getBiome(x, z) {
+  const height = simplex.noise2D(x * 0.01, z * 0.01);
+  if (height < BIOME_THRESHOLD.forest) return "forest";
+  if (height < BIOME_THRESHOLD.desert) return "desert";
+  if (height < BIOME_THRESHOLD.mountain) return "mountain";
+  return "river";
+}
+
+function generateTerrain(chunkX, chunkZ) {
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const chunkKey = `${chunkX},${chunkZ}`;
+  if (world.has(chunkKey)) return;
+
+  const chunk = [];
+  for (let x = 0; x < CHUNK_SIZE; x++) {
+    for (let z = 0; z < CHUNK_SIZE; z++) {
+      const worldX = chunkX * CHUNK_SIZE + x;
+      const worldZ = chunkZ * CHUNK_SIZE + z;
+
+      const height = Math.floor(simplex.noise2D(worldX * 0.05, worldZ * 0.05) * 10 + 15);
+      const biome = getBiome(worldX, worldZ);
+      let texture;
+
+      switch (biome) {
+        case "forest":
+          texture = textures.wood;
+          break;
+        case "desert":
+          texture = textures.dirt;
+          break;
+        case "mountain":
+          texture = textures.stone;
+          break;
+        default:
+          texture = textures.dirt;
+      }
+
+      for (let y = 0; y <= height; y++) {
+        const material = new THREE.MeshStandardMaterial({ map: texture });
+        const block = new THREE.Mesh(geometry, material);
+        block.position.set(worldX, y, worldZ);
+        block.castShadow = true;
+        block.receiveShadow = true;
+        scene.add(block);
+        chunk.push(block);
+      }
+    }
+  }
+  world.set(chunkKey, chunk);
+}
+
+/** Inventory Management **/
+document.querySelectorAll(".slot").forEach((slot) => {
+  slot.addEventListener("click", () => {
+    document.querySelectorAll(".slot").forEach((s) => s.classList.remove("active"));
+    slot.classList.add("active");
+    selectedBlock = slot.getAttribute("data-block");
+  });
+});
+
+/** Update Player Stats **/
+function updateStats() {
+  hunger = Math.max(0, hunger - 0.01);
+  document.getElementById("hunger").textContent = Math.floor(hunger);
+
+  if (hunger <= 0) {
+    health = Math.max(0, health - 0.1);
+    document.getElementById("health").textContent = Math.floor(health);
+  }
+}
+
+/** Game Loop **/
+function animate() {
+  updateStats();
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+/** Initialize Game **/
+function initGame() {
+  for (let x = -2; x <= 2; x++) {
+    for (let z = -2; z <= 2; z++) {
+      generateTerrain(x, z);
+    }
+  }
+  animate();
+}
+
+initGame();
+</script>
+</body>
+</html>
