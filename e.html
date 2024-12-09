@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Minecraft Simulator</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+    }
+    #inventory {
+      position: fixed;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+    }
+    .slot {
+      width: 50px;
+      height: 50px;
+      border: 2px solid #fff;
+      background-color: #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      cursor: pointer;
+    }
+    .active {
+      border: 2px solid #FFD700; /* Highlight selected block */
+    }
+  </style>
+</head>
+<body>
+<div id="inventory">
+  <div class="slot active" data-block="dirt">D</div>
+  <div class="slot" data-block="grass">G</div>
+  <div class="slot" data-block="stone">S</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+<script>
+// --- Setup ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb); // Sky blue
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 5, 10);
+
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// --- Lighting ---
+const sunlight = new THREE.DirectionalLight(0xffffff, 1);
+sunlight.position.set(50, 100, 50);
+sunlight.castShadow = true;
+scene.add(sunlight);
+
+const ambientLight = new THREE.AmbientLight(0xaaaaaa, 0.5);
+scene.add(ambientLight);
+
+// --- Block Textures ---
+const loader = new THREE.TextureLoader();
+const textures = {
+  dirt: loader.load("https://i.imgur.com/4Rnw7b1.jpg"),
+  grass: loader.load("https://i.imgur.com/xCkSUGD.jpg"),
+  stone: loader.load("https://i.imgur.com/Tmr5kWB.jpg"),
+};
+
+// --- World Generation ---
+const worldSize = 20;
+const blocks = [];
+
+function generateTerrain() {
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  for (let x = -worldSize / 2; x < worldSize / 2; x++) {
+    for (let z = -worldSize / 2; z < worldSize / 2; z++) {
+      const height = Math.floor(Math.random() * 5) + 1;
+      for (let y = 0; y < height; y++) {
+        const material = new THREE.MeshStandardMaterial({
+          map: y === height - 1 ? textures.grass : textures.dirt,
+        });
+        const block = new THREE.Mesh(geometry, material);
+        block.position.set(x, y, z);
+        block.castShadow = true;
+        block.receiveShadow = true;
+        scene.add(block);
+        blocks.push(block);
+      }
+    }
+  }
+}
+
+generateTerrain();
+
+// --- Player Controls ---
+const controls = {
+  forward: false,
+  backward: false,
+  left: false,
+  right: false,
+  jump: false,
+};
+const velocity = { x: 0, y: 0, z: 0 };
+
+window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyW") controls.forward = true;
+  if (e.code === "KeyS") controls.backward = true;
+  if (e.code === "KeyA") controls.left = true;
+  if (e.code === "KeyD") controls.right = true;
+});
+
+window.addEventListener("keyup", (e) => {
+  if (e.code === "KeyW") controls.forward = false;
+  if (e.code === "KeyS") controls.backward = false;
+  if (e.code === "KeyA") controls.left = false;
+  if (e.code === "KeyD") controls.right = false;
+});
+
+// --- Block Placement & Removal ---
+let selectedBlock = "dirt";
+document.querySelectorAll(".slot").forEach((slot) => {
+  slot.addEventListener("click", () => {
+    document.querySelectorAll(".slot").forEach((s) => s.classList.remove("active"));
+    slot.classList.add("active");
+    selectedBlock = slot.getAttribute("data-block");
+  });
+});
+
+window.addEventListener("click", (e) => {
+  const mouse = new THREE.Vector2(
+    (e.clientX / window.innerWidth) * 2 - 1,
+    -(e.clientY / window.innerHeight) * 2 + 1
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(mouse, camera);
+
+  const intersects = raycaster.intersectObjects(blocks);
+  if (intersects.length > 0) {
+    const intersectedBlock = intersects[0].object;
+
+    if (e.shiftKey) {
+      // Remove block
+      scene.remove(intersectedBlock);
+      blocks.splice(blocks.indexOf(intersectedBlock), 1);
+    } else {
+      // Place block
+      const position = intersects[0].point
+        .clone()
+        .add(intersects[0].face.normal)
+        .round();
+      const geometry = new THREE.BoxGeometry(1, 1, 1);
+      const material = new THREE.MeshStandardMaterial({
+        map: textures[selectedBlock],
+      });
+      const block = new THREE.Mesh(geometry, material);
+      block.position.copy(position);
+      block.castShadow = true;
+      block.receiveShadow = true;
+      scene.add(block);
+      blocks.push(block);
+    }
+  }
+});
+
+// --- Animation Loop ---
+function animate() {
+  if (controls.forward) velocity.z -= 0.1;
+  if (controls.backward) velocity.z += 0.1;
+  if (controls.left) velocity.x -= 0.1;
+  if (controls.right) velocity.x += 0.1;
+
+  camera.position.x += velocity.x;
+  camera.position.z += velocity.z;
+
+  velocity.x *= 0.9; // Friction
+  velocity.z *= 0.9;
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>
