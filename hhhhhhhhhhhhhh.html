@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minecraft Simulator</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #87ceeb; /* Sky blue */
+    }
+    #ui {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      color: white;
+      font-family: Arial, sans-serif;
+      padding: 10px;
+      display: flex;
+      justify-content: space-between;
+    }
+    #inventory {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 400px;
+      height: 300px;
+      background: rgba(0, 0, 0, 0.8);
+      border: 2px solid white;
+      display: none;
+      flex-wrap: wrap;
+      padding: 10px;
+    }
+    .slot {
+      width: 60px;
+      height: 60px;
+      border: 2px solid white;
+      margin: 5px;
+      background: gray;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      color: white;
+    }
+    .slot.active {
+      border-color: gold;
+    }
+  </style>
+</head>
+<body>
+<div id="ui">
+  <div id="stats">Health: <span id="health">100</span></div>
+</div>
+<div id="inventory"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+<script>
+/** Game Settings **/
+const WORLD_SIZE = 20; // Number of blocks in the world
+const BLOCK_SIZE = 1; // Each block is a cube of size 1
+const PLAYER_REACH = 3; // Distance the player can interact with blocks
+
+/** Game Variables **/
+let health = 100;
+let isInventoryOpen = false;
+let inventory = { dirt: 0, stone: 0, grass: 0 };
+let selectedSlot = 0;
+
+/** Setup Scene, Camera, and Renderer **/
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 5, 10);
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+/** Lighting **/
+const sunlight = new THREE.DirectionalLight(0xffffff, 1);
+sunlight.position.set(50, 100, 50);
+sunlight.castShadow = true;
+scene.add(sunlight);
+
+const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+scene.add(ambientLight);
+
+/** Textures **/
+const loader = new THREE.TextureLoader();
+const textures = {
+  dirt: loader.load("https://i.imgur.com/M4ZaMti.jpg"),
+  grass: loader.load("https://i.imgur.com/xCkSUGD.jpg"),
+  stone: loader.load("https://i.imgur.com/qbKNel3.jpg"),
+};
+
+/** Terrain Generation **/
+const world = [];
+function generateTerrain() {
+  const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+
+  for (let x = 0; x < WORLD_SIZE; x++) {
+    for (let z = 0; z < WORLD_SIZE; z++) {
+      const height = Math.floor(Math.random() * 5 + 1);
+      for (let y = 0; y < height; y++) {
+        const material = new THREE.MeshStandardMaterial({
+          map: y === height - 1 ? textures.grass : textures.dirt,
+        });
+        const block = new THREE.Mesh(geometry, material);
+        block.position.set(x, y, z);
+        block.castShadow = true;
+        block.receiveShadow = true;
+        block.userData = { type: y === height - 1 ? "grass" : "dirt" };
+        scene.add(block);
+        world.push(block);
+      }
+    }
+  }
+}
+
+/** Block Interaction **/
+function raycastBlocks() {
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+  const intersects = raycaster.intersectObjects(world);
+  if (intersects.length > 0) {
+    const block = intersects[0].object;
+    const distance = intersects[0].distance;
+
+    if (distance <= PLAYER_REACH) return block;
+  }
+  return null;
+}
+
+function breakBlock() {
+  const block = raycastBlocks();
+  if (block) {
+    const type = block.userData.type;
+    inventory[type] = (inventory[type] || 0) + 1;
+    scene.remove(block);
+    const index = world.indexOf(block);
+    if (index !== -1) world.splice(index, 1);
+    updateInventoryUI();
+  }
+}
+
+/** Inventory **/
+function toggleInventory() {
+  isInventoryOpen = !isInventoryOpen;
+  document.getElementById("inventory").style.display = isInventoryOpen ? "flex" : "none";
+}
+
+function updateInventoryUI() {
+  const inventoryDiv = document.getElementById("inventory");
+  inventoryDiv.innerHTML = "";
+  Object.entries(inventory).forEach(([key, value], index) => {
+    const slot = document.createElement("div");
+    slot.className = `slot ${index === selectedSlot ? "active" : ""}`;
+    slot.textContent = `${key} (${value})`;
+    inventoryDiv.appendChild(slot);
+  });
+}
+
+/** Controls **/
+window.addEventListener("click", breakBlock);
+window.addEventListener("keydown", (event) => {
+  if (event.key === "e") {
+    toggleInventory();
+  }
+});
+
+/** Game Loop **/
+function animate() {
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+/** Initialize Game **/
+function initGame() {
+  generateTerrain();
+  updateInventoryUI();
+  animate();
+}
+
+initGame();
+</script>
+</body>
+</html>
